@@ -1,0 +1,262 @@
+---
+title: "HMDA Census Tract Level Maps"
+output: html_document
+date: "2024-02-25"
+---
+The following are loan statistics from HMDA data reported at the census tract level.
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+# https://stackoverflow.com/questions/61771543/assigning-colors-to-table-values-using-choroplethr
+
+library(knitr)
+library(choroplethr)
+library(choroplethrMaps)
+library(choroplethrZip)
+delay_code_labels <- NULL
+knit_hooks$set(delay = function(before, options, envir) {
+    if (before) {
+        delay_code_labels <<- append(delay_code_labels, options$label)
+        return(NULL)  ## otherwise knitr will print delay_code_labels every time
+    } else {
+        
+    }
+})
+opts_chunk$set(delay = TRUE, echo = FALSE, message = FALSE, warning = FALSE, 
+              fig.align='left', fig.width = 8,fig.height=8,dpi=300)
+
+```
+
+```{r }
+setwd('/home/shino/00 SF Loan Performance/00nano/89hmda')
+data(state.regions)
+#reference_map<-TRUE
+reference_map<-FALSE
+# when setting reference_map<-TRUE , see Google authorization notes below
+# https://www.r-bloggers.com/2019/05/bug-when-creating-reference-maps-with-choroplethr/
+library(ggmap)
+library(mapproj)
+register_google('AIzaSyBaOcyvB-2juG7eRhz79tQalWMtsAMFqh0')
+#state_choropleth(df_pop_state,
+#    num_colors = 1,
+#    zoom = c("california", "oregon", "washington"),
+#    reference_map = TRUE)
+overwrite<-FALSE
+state_list<-c('new york','new jersey') # ,'california','texas','florida')
+outfile<-'cbsa.tsv'
+cbsa_sqlfile<-'cbsa_v01.sql'
+year<-2021
+if(overwrite | !file.exists(outfile))
+{
+  system(paste0('cat ',cbsa_sqlfile, ' | cpp -I. -I.. -DYEAR=',year
+                ,' | time mysql --login-path=shino loans | tee ',outfile))
+}
+cbsa<-read.csv(outfile,sep='\t') ## ,colClasses=c("character","numeric"))
+data(state.regions)
+```
+
+```{r,error=TRUE}
+map_tracts<-function(data,state,title,cbsa)
+{
+  library(ggplot2)
+  library(RColorBrewer)
+  breaks<-c(0,0.015,100)
+  #breaks<-breaks+0.0001
+   # breaks<-c(0.01,0.0125,0.015,0.0175,0.10,0.25,0.5,1)
+    #  breaks<-c(0,0.05,0.10,0.25,0.5,1)
+
+
+  n<-length(breaks)-1
+  palette<-"Reds"
+  cap_state<-gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2",    # Uppercase with Base R
+     state,
+     perl = TRUE)
+  map_title<-paste('Full State: ',cap_state,'\n',title)
+  map_list<-list() # plots
+  # do the state plot
+  map_list<-append(map_list,list(
+    tract_choropleth(data,state_name=state,title=map_title,num_colors=1
+                     ,reference_map=reference_map) +
+      scale_fill_stepsn(colors=RColorBrewer::brewer.pal(n,palette)
+                                ,breaks=breaks,n.breaks=n
+                                ,na.value=0,show.limits=TRUE,right=TRUE)
+    ))
+  cbsa_list<-unique(cbsa[cbsa$state_name==cap_state,c('cbsa_code','cbsa_title')])
+  # do select CBSA and Metro Division plots
+  if(nrow(cbsa_list)>0)
+  {
+    for(i in 1:nrow(cbsa_list)) # CBSAs
+    {
+      cbsa_code<-cbsa_list[i,1]
+      cbsa_name<-cbsa_list[i,2]
+      md_list<-unique(cbsa[(cbsa$state_name==cap_state)&(cbsa$cbsa_code==cbsa_code)
+                           &!is.na(cbsa$metrodiv_code)
+                           ,c('metrodiv_code','metrodiv_title')])
+
+      if(nrow(md_list)>0) # if there are Metro Divisions, loop through them
+      {
+        for(j in 1:nrow(md_list)) # plot each Metro Division seperately
+        {
+          md_code<-md_list[j,1]
+          md_name<-md_list[j,2] 
+          county_list<-unique(cbsa[cbsa$state_name==cap_state&cbsa$metrodiv_code==md_code
+                                   ,c('state_county_code')])
+          county_list<-county_list[!is.na(county_list)]
+          county_names<-unique(cbsa[(cbsa$state_name==cap_state)&(cbsa$metrodiv_code==md_code)
+                                    ,c('county')])
+          county_names<-county_names[!is.na(county_names)]
+          county_title<-gsub("County","",paste0(t(county_names),collapse=','))
+          county_title<-gsub(" ,",",",county_title)
+          map_title<-paste('State:',cap_state,'\n'
+                           ,'CBSA:',cbsa_code,cbsa_name,'\n'
+                           ,'Metro Division:',md_code,md_name,'\n'
+                           ,'Counties:',county_title,'\n',title)
+          map_list<-append(map_list,list(
+            tract_choropleth(data,state_name=state,title=map_title,num_colors=1
+                             ,county_zoom=county_list
+                             ,reference_map=reference_map) +
+              scale_fill_stepsn(colors=RColorBrewer::brewer.pal(n,palette)
+                                ,breaks=breaks,n.breaks=n
+                                ,na.value=0,show.limits=TRUE,right=TRUE)
+          ))
+        }        
+      }
+      else # no Metro Divisions, plot counties in CBSA
+      {
+        county_list<-cbsa[cbsa$state_name==cap_state&cbsa$cbsa_code==cbsa_code,c('state_county_code')]
+        county_names<-cbsa[cbsa$state_name==cap_state&cbsa$cbsa_code==cbsa_code,c('county')]
+        county_title<-gsub("County","",paste0(t(county_names),collapse=','))
+        county_title<-gsub(" ,",",",county_title)
+        map_title<-paste('State:',cap_state,'\n'
+                         ,'CBSA:',cbsa_code,cbsa_name,'\n'
+                         ,'Counties:',county_title,'\n',title)
+        map_list<-append(map_list,list(
+          tract_choropleth(data,state_name=state,title=map_title,num_colors=1
+                           ,county_zoom=county_list
+                           ,reference_map=reference_map) + 
+            scale_fill_stepsn(colors=RColorBrewer::brewer.pal(n,palette)
+                              ,breaks=breaks,n.breaks=n
+                              ,na.value=0,show.limits=TRUE,right=TRUE)
+          ))
+      }
+    }
+  }
+  return (map_list)
+}
+
+```
+
+```{r hmda_strats, eval=FALSE}
+script='run_sql_v22.sh'
+sqlfile<-"hmda_strats_v06.sql"
+param<-'CONV CONF PURCH YEARS=2019,2020,2021,2022,2023'
+prefix<-'_0-'
+suffix<-'.tsv'
+outfile<-paste0(prefix,gsub(' ','-',param),suffix)
+if(!file.exists(sqlfile))
+{
+  knitr::knit_exit()
+}
+if(overwrite | !file.exists(outfile))
+{
+  system(paste(script,sqlfile,param))
+}
+if(!file.exists(outfile))
+{
+  knitr::knit_exit()
+}
+hmda_data<-read.csv(outfile,sep='\t') ## ,colClasses=c("character","numeric"))
+```
+
+
+
+
+```{r second,eval=FALSE}
+
+map_title<-paste("Second Homes ",param)
+data<-hmda_data[,c('census_tract','second_home_pct')]
+names(data)<-c("region","value")
+maps<-list()
+```
+
+```{r ama-ig}
+map_title<-'Est. AMA-IG'
+loans<-read.csv("tract.csv",sep=',')
+hist(loans$Average.of.AMA_IG_._UPB,breaks=20,xlim=c(0,.10))
+
+data<-loans[,c("Row.Labels","Average.of.AMA_IG_._UPB")]
+names(data)<-c("region","value")
+maps<-list()
+```
+
+```{r, include=FALSE}
+for (state_name in state_list)
+{
+  maps<-append(maps,map_tracts(data,state_name,map_title,cbsa))
+}
+```
+
+```{r,error=TRUE}
+for (map in maps)
+{
+  print(map)
+}
+```
+
+<!-- ## Cashout Refi -->
+
+<!-- ```{r cashout} -->
+
+<!-- map_title<-paste("Cashout Refis",year) -->
+<!-- maps<-list() -->
+<!-- data<-hmda_data[,c('census_tract','cashout_pct')] -->
+<!-- names(data)<-c("region","value") -->
+<!-- ``` -->
+
+<!-- ```{r, include=FALSE} -->
+<!-- for (state_name in state_list) -->
+<!-- { -->
+<!--   maps<-append(maps,map_tracts(data,state_name,map_title,cbsa)) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- for (map in maps) -->
+<!-- { -->
+<!--   print(map) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ## Low Income (LMI) Loans -->
+
+<!-- ```{r lmi} -->
+<!-- map_title<-paste("LMI Loans (<80% AMI) in",year) -->
+<!-- maps<-list() -->
+<!-- data<-hmda_data[,c('census_tract','lmi_pct')] -->
+<!-- names(data)<-c("region","value") -->
+<!-- ``` -->
+
+<!-- ```{r, include=FALSE} -->
+<!-- for (state_name in state_list) -->
+<!-- { -->
+<!--   maps<-append(maps,map_tracts(data,state_name,map_title, cbsa)) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- for (map in maps) -->
+<!-- { -->
+<!--   print(map) -->
+<!-- } -->
+<!-- ``` -->
+
+## Source Listing: `r knitr::current_input()`
+
+```{r codeprint, echo = TRUE, eval = FALSE, ref.label = delay_code_labels, delay = FALSE}
+```
+
+## Environment
+```{r}
+sessionInfo()
+```
+

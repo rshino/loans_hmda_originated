@@ -1,0 +1,105 @@
+---
+title: "HMDA Second Home Maps"
+output: html_document
+date: "2024-02-25"
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(choroplethr)
+library(choroplethrMaps)
+library(choroplethrZip)
+delay_code_labels <- NULL
+knit_hooks$set(delay = function(before, options, envir) {
+    if (before) {
+        delay_code_labels <<- append(delay_code_labels, options$label)
+        return(NULL)  ## otherwise knitr will print delay_code_labels every time
+    } else {
+        
+    }
+})
+opts_chunk$set(delay = TRUE, echo = FALSE, message = FALSE, warning = FALSE, 
+               fig.width = 6, fig.asp = 0.618)
+
+```
+
+## Second Homes
+```{r}
+map_tracts<-function(data,state,title)
+{
+  library(ggplot2)
+  library(RColorBrewer)
+  cap_state<-gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2",    # Uppercase with Base R
+     state,
+     perl = TRUE)
+  map_title<-paste(cap_state,title)
+  return (invisible(
+    tract_choropleth(data,state_name=state,title=map_title,num_colors=6) 
+      #+ scale_fill_manual(values = c("red", "grey", "seagreen3","yellow",na.value="white"))
+      #,num_colors=5)
+  #  +
+  #    scale_fill_manual(values=c("<1%" = "#ffffffff",  
+  #                           "%1-5%" = "#64acbe", 
+  #                           "5-10%" = "#c85a5a", 
+  #                           ">10%" = "#574249",
+  #                           "NA" = "#ffffffff"),
+  #                  name="Second Homes")
+    ))
+}
+```
+
+
+```{r map}
+# https://stackoverflow.com/questions/61771543/assigning-colors-to-table-values-using-choroplethr
+setwd('/home/shino/00 SF Loan Performance/00nano/89hmda')
+outfile<-'second.tsv'
+overwrite<-FALSE
+sqlfile<-"second_hmda_v01.sql"
+if(overwrite | !file.exists(outfile))
+{
+  system(paste('cat',sqlfile, ' | time mysql --login-path=shino loans | tee',outfile))
+}
+data<-read.csv(outfile,sep='\t') ## ,colClasses=c("character","numeric"))
+data$orig<-data$value
+#data$value <- cut (data$orig, breaks = c(0, 0.01, 0.05, 0.10, 1))
+
+#ny<-invisible(tract_choropleth(data,"new york"))
+#nj<-tract_choropleth(data,"new jersey")
+map_title<-"Conventional Mortgage Second Homes in 2022"
+maps<-list()
+data(state.regions)
+```
+
+```{r, include=FALSE}
+for (state_name in c('new york','new jersey','california','texas','florida')) # state.regions[,1])
+{
+  maps<-append(maps,list(map_tracts(data,state_name,map_title)))
+}
+```
+
+```{r}
+for (map in maps)
+{
+  print(map)
+}
+
+```
+
+## Source File: `r knitr::current_input()`
+
+```{r codeprint, echo = TRUE, eval = FALSE, ref.label = delay_code_labels, delay = FALSE}
+```
+
+## Query Listing: `r sqlfile`
+
+`r sqlfile` queries hmda_lar and returns second homes grouped by census_tract for conventional loans.
+```sql
+`r xfun::file_string(sqlfile)`
+```
+
+## Environment
+```{r}
+sessionInfo()
+```
+

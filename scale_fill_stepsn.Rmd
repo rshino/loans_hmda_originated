@@ -1,0 +1,40 @@
+---
+title: "scale_fill_stepsn"
+output: html_document
+date: "2024-03-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r scale_fill_stepsn}
+library(ggplot2)
+gg<-ggplot(data.frame(val = c(0.1, 0.5, 0.9, 10.2, 15), x = 1:5),
+       aes(x, 0, fill = val)) +
+  geom_tile()
+
+gg+  scale_fill_stepsn(name = "Test Rate \n (n/1000)", 
+                    colors =c("#999999","#6666FF", "#FFFF66","#FF6633"),
+                    breaks = c(0,1, 10, 100), 
+                    trans = scales::pseudo_log_trans(), #  ADDED THIS LINE
+                    labels=scales::label_number(accuracy=1),
+                    show.limits = TRUE) 
+```
+
+```{r}
+palette<-"Reds"
+breaks = c(0,1, 10, 100)
+  n<-length(breaks)-1
+gg+scale_fill_stepsn(colors=RColorBrewer::brewer.pal(n,palette)
+                                ,breaks=breaks,n.breaks=n
+                                ,na.value=0,show.limits=TRUE,right=TRUE)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
